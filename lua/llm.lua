@@ -1,40 +1,19 @@
 local M = {}
 
 local vim = vim or {} -- Ensure the `vim` global is available
-local curl = require('plenary.curl')
-local telescope = require('telescope')
-local pickers = require('telescope.pickers')
-local finders = require('telescope.finders')
-local actions = require('telescope.actions')
-local previewers = require('telescope.previewers')
-local action_state = require('telescope.actions.state')
-local conf = require('telescope.config').values
-local Job = require 'plenary.job'
+local curl = require("plenary.curl")
+local telescope = require("telescope")
+local pickers = require("telescope.pickers")
+local finders = require("telescope.finders")
+local actions = require("telescope.actions")
+local previewers = require("telescope.previewers")
+local action_state = require("telescope.actions.state")
+local conf = require("telescope.config").values
+local Job = require("plenary.job")
 
 local timeout_ms = 10000
 
-local service_lookup = {
-	groq = {
-		url = "https://api.groq.com/openai/v1/chat/completions",
-		model = "llama3-70b-8192",
-		api_key_name = "GROQ_API_KEY",
-	},
-	openai = {
-		url = "https://api.openai.com/v1/chat/completions",
-		model = "gpt-4o",
-		api_key_name = "OPENAI_API_KEY",
-	},
-	anthropic = {
-		url = "https://api.anthropic.com/v1/messages",
-		model = "claude-3-5-sonnet-20240620",
-		api_key_name = "ANTHROPIC_API_KEY",
-	},
-    gemini = {
-             url = "https://generativelanguage.googleapis.com/v1/models",
-             model = "gemini-1.5-flash",
-             api_key_name = "GEMINI_API_KEY",
-     },
-}
+local service_lookup = {}
 
 local function get_api_key(name)
 	return os.getenv(name)
@@ -49,83 +28,81 @@ function M.setup(opts)
 	end
 end
 
-
-local curl = require('plenary.curl')
-local finders = require('telescope.finders')
-local pickers = require('telescope.pickers')
-local conf = require('telescope.config').values
-local actions = require('telescope.actions')
-local action_state = require('telescope.actions.state')
-
+local curl = require("plenary.curl")
+local finders = require("telescope.finders")
+local pickers = require("telescope.pickers")
+local conf = require("telescope.config").values
+local actions = require("telescope.actions")
+local action_state = require("telescope.actions.state")
 
 function M.async_fetch_models(callback)
-  curl.get('https://openrouter.ai/api/v1/models', {
-    callback = vim.schedule_wrap(function(response)
-      if response.status ~= 200 then
-        print('Failed to fetch models')
-        callback({})
-      else
-        -- Using pcall to safely decode JSON
-        local success, data = pcall(vim.json.decode, response.body)
-        if not success or type(data) ~= 'table' then
-          print('Invalid data received')
-          callback({})
-        else
-          callback(data.data)
-        end
-      end
-    end)
-  })
+	curl.get("https://openrouter.ai/api/v1/models", {
+		callback = vim.schedule_wrap(function(response)
+			if response.status ~= 200 then
+				print("Failed to fetch models")
+				callback({})
+			else
+				-- Using pcall to safely decode JSON
+				local success, data = pcall(vim.json.decode, response.body)
+				if not success or type(data) ~= "table" then
+					print("Invalid data received")
+					callback({})
+				else
+					callback(data.data)
+				end
+			end
+		end),
+	})
 end
-
-
 
 function M.pick_model()
-  M.async_fetch_models(function(models)
-    pickers.new({}, {
-      prompt_title = 'Select a Model',
-      finder = finders.new_table {
-        results = models,
-        entry_maker = function(entry)
-          return {
-            value = entry,
-            display = entry.name or entry.id,
-            ordinal = entry.name or entry.id,
-            metadata = entry
-          }
-        end,
-      },
-      sorter = conf.generic_sorter({}),
-      previewer = previewers.new_buffer_previewer({
-define_preview = function(self, entry, status)
-  local bufnr = self.state.bufnr
-  local model = entry.metadata
+	M.async_fetch_models(function(models)
+		pickers
+			.new({}, {
+				prompt_title = "Select a Model",
+				finder = finders.new_table({
+					results = models,
+					entry_maker = function(entry)
+						return {
+							value = entry,
+							display = entry.name or entry.id,
+							ordinal = entry.name or entry.id,
+							metadata = entry,
+						}
+					end,
+				}),
+				sorter = conf.generic_sorter({}),
+				previewer = previewers.new_buffer_previewer({
+					define_preview = function(self, entry, status)
+						local bufnr = self.state.bufnr
+						local model = entry.metadata
 
-  local function sanitize(str)
-    return str:gsub("\n", " ")
-  end
+						local function sanitize(str)
+							return str:gsub("\n", " ")
+						end
 
-  local function pretty_json(obj)
-    local json_str = vim.fn.json_encode(obj)
-    local pretty_str = vim.fn.system('python -m json.tool', json_str)
-    return pretty_str
-  end
+						local function pretty_json(obj)
+							local json_str = vim.fn.json_encode(obj)
+							local pretty_str = vim.fn.system("python -m json.tool", json_str)
+							return pretty_str
+						end
 
-  local content = vim.split(pretty_json(model), '\n')
+						local content = vim.split(pretty_json(model), "\n")
 
-  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, content)
-end
-      }),
-      attach_mappings = function(prompt_bufnr, map)
-        actions.select_default:replace(function()
-          local selection = action_state.get_selected_entry()
-          actions.close(prompt_bufnr)
-          M.model = selection.value.id
-        end)
-        return true
-      end,
-    }):find()
-  end)
+						vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, content)
+					end,
+				}),
+				attach_mappings = function(prompt_bufnr, map)
+					actions.select_default:replace(function()
+						local selection = action_state.get_selected_entry()
+						actions.close(prompt_bufnr)
+						M.model = selection.value.id
+					end)
+					return true
+				end,
+			})
+			:find()
+	end)
 end
 
 function M.get_lines_until_cursor()
@@ -191,30 +168,20 @@ local function process_data_lines(buffer, service, process_data)
 	end
 end
 
-
 local function prepare_request(opts)
+	print("tharun:opts:", vim.inspect(opts))
 	local replace = opts.replace
 	local service = opts.service
+	local prompt = ""
 	local visual_lines = M.get_visual_selection()
-	local system_prompt = [[
-You are an AI programming assistant integrated into a code editor. Your purpose is to help the user with programming tasks as they write code.
-Key capabilities:
-- Thoroughly analyze the user's code and provide insightful suggestions for improvements related to best practices, performance, readability, and maintainability. Explain your reasoning.
-- Answer coding questions in detail, using examples from the user's own code when relevant. Break down complex topics step-by-step.
-- Spot potential bugs and logical errors. Alert the user and suggest fixes.
-- Upon request, add helpful comments explaining complex or unclear code.
-- Suggest relevant documentation, StackOverflow answers, and other resources related to the user's code and questions.
-- Engage in back-and-forth conversations to understand the user's intent and provide the most helpful information.
-- Keep concise and use markdown.
-- When asked to create code, only generate the code. No bugs.
-- Think step by step
-    ]]
+
+	local found_service = service_lookup[service]
+	local system_prompt = found_service.system_prompt
+		or [[ In the voice of an angry pirate, yell at me and tell me that i haven't set up my system prompt]]
 
 	if visual_lines then
 		prompt = table.concat(visual_lines, "\n")
 		if replace then
-			system_prompt =
-			"Follow the instructions in the code comments. Generate code only. Think step by step. If you must speak, do so in comments. Generate valid code only."
 			vim.api.nvim_command("normal! d")
 			vim.api.nvim_command("normal! k")
 		else
@@ -224,7 +191,6 @@ Key capabilities:
 		prompt = M.get_lines_until_cursor()
 	end
 
-	local found_service = service_lookup[service]
 	if not found_service then
 		print("Invalid service: " .. service)
 		return nil
@@ -235,42 +201,47 @@ Key capabilities:
 	local api_key_name = found_service.api_key_name
 	local api_key = api_key_name and get_api_key(api_key_name)
 
-     if service == "gemini" then
-             url = url .. "/" .. model .. ":generateContent?key=" .. api_key
-     end
+	if string.find(service, "gemini") then
+		url = url .. "/" .. model .. ":generateContent?key=" .. api_key
+	end
 
-    local data = {};
+	local data = {}
 
-    if service == "gemini" then
-         data = {
-                       contents = {
-                               {
-                                       parts = {
-                                               { text = prompt },
-                                       },
-                               },
-                       },
-               }
-    else
-	data = {
-		messages = {
-			{
-				role = "system",
-				content = system_prompt,
+	if string.find(service, "gemini") then
+		data = {
+			contents = {
+				{
+					parts = {
+						{
+							text = "\n============ sytem prompt ============\n"
+								.. system_prompt
+								.. "\n=========== user's prompt ============\n"
+								.. prompt,
+						},
+					},
+				},
 			},
-			{
-				role = "user",
-				content = prompt,
+		}
+	else
+		data = {
+			messages = {
+				{
+					role = "system",
+					content = system_prompt,
+				},
+				{
+					role = "user",
+					content = prompt,
+				},
 			},
-		},
-		model = model,
-		stream = true,
-	}
-    end
+			model = model,
+			stream = true,
+		}
+	end
 
 	if service == "anthropic" then
 		data.max_tokens = 1024
-    elseif service == "gemini" then
+	elseif string.find(service, "gemini") then
 	else
 		data.temperature = 0.7
 	end
@@ -282,12 +253,11 @@ Key capabilities:
 		"-H",
 		"Content-Type: application/json",
 		"-d",
-		vim.json.encode(data)
+		vim.json.encode(data),
 	}
 
-	if api_key and service ~= "gemini" then
-		local header_auth = service == "anthropic" and "x-api-key: " .. api_key or
-		"Authorization: Bearer " .. api_key
+	if api_key and not string.find(service, "gemini") then
+		local header_auth = service == "anthropic" and "x-api-key: " .. api_key or "Authorization: Bearer " .. api_key
 		table.insert(args, "-H")
 		table.insert(args, header_auth)
 		if service == "anthropic" then
@@ -307,23 +277,25 @@ function M.prompt(opts)
 		return
 	end
 	vim.api.nvim_command("normal! o")
-	vim.api.nvim_command('undojoin')
+	vim.api.nvim_command("undojoin")
+
+	print("tharun:args:", vim.inspect(args))
 	Job:new({
-		command = 'curl',
+		command = "curl",
 		args = args,
 		on_stdout = function(err, buffer)
 			if err then
 				print("Error:", err)
 			else
-                -- print("tharun:buffer:", vim.inspect(buffer))
+				-- print("tharun:buffer:", vim.inspect(buffer))
 				process_data_lines(buffer, opts.service, function(data)
 					local content
-                    if opts.service == "gemini" then
-                        if data.candidates and data.candidates[1].content.parts[1].text then
-                            -- print("tharun:content:", vim.inspect(data.candidates[1].content.parts[1].text))
-                            content = data.candidates[1].content.parts[1].text
-                        end
-                    elseif opts.service == "anthropic" then
+					if string.find(opts.service, "gemini") then
+						if data.candidates and data.candidates[1].content.parts[1].text then
+							-- print("tharun:content:", vim.inspect(data.candidates[1].content.parts[1].text))
+							content = data.candidates[1].content.parts[1].text
+						end
+					elseif opts.service == "anthropic" then
 						if data.delta and data.delta.text then
 							content = data.delta.text
 						end
@@ -334,41 +306,42 @@ function M.prompt(opts)
 					end
 					if content and content ~= vim.NIL then
 						-- has_tokens = true
-						vim.api.nvim_command('undojoin')
+						vim.api.nvim_command("undojoin")
 						write_string_at_cursor(content)
 					end
 				end)
 			end
 		end,
 		on_exit = function(j, return_val)
-            -- print("tharun:j:", vim.inspect(j:result()))
+			local json_string = table.concat(j:result())
 
-            local json_string = table.concat(j:result())
+			local data_str = "data: " .. json_string
 
-            local data_str = "data: " .. json_string
+			print("tharun:data_str:", vim.inspect(data_str))
 
-				process_data_lines(data_str, opts.service, function(data)
-					local content
-                    if opts.service == "gemini" then
-                        if data.candidates and data.candidates[1].content.parts[1].text then
-                            -- print("tharun:content:", vim.inspect(data.candidates[1].content.parts[1].text))
-                            content = data.candidates[1].content.parts[1].text
-                        end
-                    elseif opts.service == "anthropic" then
-						if data.delta and data.delta.text then
-							content = data.delta.text
-						end
-					else
-						if data.choices and data.choices[1] and data.choices[1].delta then
-							content = data.choices[1].delta.content
-						end
+			process_data_lines(data_str, opts.service, function(data)
+				local content
+				if string.find(opts.service, "gemini") then
+					print("tharun:data:", vim.inspect(data))
+					if data.candidates and data.candidates[1].content.parts[1].text then
+						-- print("tharun:content:", vim.inspect(data.candidates[1].content.parts[1].text))
+						content = data.candidates[1].content.parts[1].text
 					end
-					if content and content ~= vim.NIL then
-						-- has_tokens = true
-						vim.api.nvim_command('undojoin')
-						write_string_at_cursor(content)
+				elseif opts.service == "anthropic" then
+					if data.delta and data.delta.text then
+						content = data.delta.text
 					end
-				end)
+				else
+					if data.choices and data.choices[1] and data.choices[1].delta then
+						content = data.choices[1].delta.content
+					end
+				end
+				if content and content ~= vim.NIL then
+					-- has_tokens = true
+					vim.api.nvim_command("undojoin")
+					write_string_at_cursor(content)
+				end
+			end)
 
 			if return_val ~= 0 then
 				print("Curl command failed with code:", return_val)
@@ -378,11 +351,20 @@ function M.prompt(opts)
 end
 
 function M.get_visual_selection()
-	local _, srow, scol = unpack(vim.fn.getpos("v"))
-	local _, erow, ecol = unpack(vim.fn.getpos("."))
+	local is_motion = _G.op_func_llm_prompt ~= nil
+	local start_mark, end_mark
+	if is_motion then
+		start_mark = "'["
+		end_mark = "']"
+	else
+		start_mark = "v"
+		end_mark = "."
+	end
+	local _, srow, scol = unpack(vim.fn.getpos(start_mark))
+	local _, erow, ecol = unpack(vim.fn.getpos(end_mark))
 
 	-- visual line mode
-	if vim.fn.mode() == "V" then
+	if vim.fn.mode() == "V" or is_motion then
 		if srow > erow then
 			return vim.api.nvim_buf_get_lines(0, erow - 1, srow, true)
 		else
@@ -411,8 +393,7 @@ function M.get_visual_selection()
 		for i = srow, erow do
 			table.insert(
 				lines,
-				vim.api.nvim_buf_get_text(0, i - 1, math.min(scol - 1, ecol), i - 1,
-					math.max(scol - 1, ecol), {})[1]
+				vim.api.nvim_buf_get_text(0, i - 1, math.min(scol - 1, ecol), i - 1, math.max(scol - 1, ecol), {})[1]
 			)
 		end
 		return lines
@@ -433,4 +414,3 @@ function M.create_llm_md()
 end
 
 return M
-
