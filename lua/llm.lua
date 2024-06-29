@@ -29,6 +29,11 @@ local service_lookup = {
 		model = "claude-3-5-sonnet-20240620",
 		api_key_name = "ANTHROPIC_API_KEY",
 	},
+    gemini = {
+             url = "https://generativelanguage.googleapis.com/v1/models",
+             model = "gemini-1.5-flash",
+             api_key_name = "GEMINI_API_KEY",
+     },
 }
 
 local function get_api_key(name)
@@ -115,7 +120,7 @@ end
         actions.select_default:replace(function()
           local selection = action_state.get_selected_entry()
           actions.close(prompt_bufnr)
-          M.model = selection.value.id 
+          M.model = selection.value.id
         end)
         return true
       end,
@@ -147,7 +152,7 @@ local function write_string_at_cursor(str)
 	vim.api.nvim_win_set_cursor(current_window, { row + num_lines - 1, col + last_line_length })
 end
 
-local function process_data_lines(buffer, process_data)
+local function process_data_lines(buffer, service, process_data)
 	local has_line_terminators = buffer:find("\r") or buffer:find("\n")
 
 	local lines = {}
@@ -174,22 +179,14 @@ local function process_data_lines(buffer, process_data)
 			if service == "anthropic" then
 				stop = data.type == "message_stop"
 			end
-				local stop
-				if line == "data: [DONE]" then
-					return true
-				end
-				local data = vim.json.decode(json_str)
-				if "anthropic" then
-					stop = data.type == "message_stop"
-				end
-				if stop then
-					return true
-				else
-					vim.defer_fn(function()
-						process_data(data)
-						vim.cmd("undojoin")
-					end, 5)
-				end
+			if stop then
+				return true
+			else
+				vim.defer_fn(function()
+					process_data(data)
+					vim.cmd("undojoin")
+				end, 5)
+			end
 		end
 	end
 end
@@ -234,11 +231,28 @@ Key capabilities:
 	end
 
 	local url = found_service.url
-	local model = M.model
+	local model = found_service.model
 	local api_key_name = found_service.api_key_name
 	local api_key = api_key_name and get_api_key(api_key_name)
 
-	local data = {
+     if service == "gemini" then
+             url = url .. "/" .. model .. ":generateContent?key=" .. api_key
+     end
+
+    local data = {};
+
+    if service == "gemini" then
+         data = {
+                       contents = {
+                               {
+                                       parts = {
+                                               { text = prompt },
+                                       },
+                               },
+                       },
+               }
+    else
+	data = {
 		messages = {
 			{
 				role = "system",
@@ -252,9 +266,11 @@ Key capabilities:
 		model = model,
 		stream = true,
 	}
+    end
 
 	if service == "anthropic" then
 		data.max_tokens = 1024
+    elseif service == "gemini" then
 	else
 		data.temperature = 0.7
 	end
@@ -269,7 +285,7 @@ Key capabilities:
 		vim.json.encode(data)
 	}
 
-	if api_key then
+	if api_key and service ~= "gemini" then
 		local header_auth = service == "anthropic" and "x-api-key: " .. api_key or
 		"Authorization: Bearer " .. api_key
 		table.insert(args, "-H")
@@ -299,9 +315,15 @@ function M.prompt(opts)
 			if err then
 				print("Error:", err)
 			else
-				process_data_lines(buffer, function(data)
+                -- print("tharun:buffer:", vim.inspect(buffer))
+				process_data_lines(buffer, opts.service, function(data)
 					local content
-					if service == "anthropic" then
+                    if opts.service == "gemini" then
+                        if data.candidates and data.candidates[1].content.parts[1].text then
+                            -- print("tharun:content:", vim.inspect(data.candidates[1].content.parts[1].text))
+                            content = data.candidates[1].content.parts[1].text
+                        end
+                    elseif opts.service == "anthropic" then
 						if data.delta and data.delta.text then
 							content = data.delta.text
 						end
@@ -311,7 +333,7 @@ function M.prompt(opts)
 						end
 					end
 					if content and content ~= vim.NIL then
-						has_tokens = true
+						-- has_tokens = true
 						vim.api.nvim_command('undojoin')
 						write_string_at_cursor(content)
 					end
@@ -319,6 +341,35 @@ function M.prompt(opts)
 			end
 		end,
 		on_exit = function(j, return_val)
+            -- print("tharun:j:", vim.inspect(j:result()))
+
+            local json_string = table.concat(j:result())
+
+            local data_str = "data: " .. json_string
+
+				process_data_lines(data_str, opts.service, function(data)
+					local content
+                    if opts.service == "gemini" then
+                        if data.candidates and data.candidates[1].content.parts[1].text then
+                            -- print("tharun:content:", vim.inspect(data.candidates[1].content.parts[1].text))
+                            content = data.candidates[1].content.parts[1].text
+                        end
+                    elseif opts.service == "anthropic" then
+						if data.delta and data.delta.text then
+							content = data.delta.text
+						end
+					else
+						if data.choices and data.choices[1] and data.choices[1].delta then
+							content = data.choices[1].delta.content
+						end
+					end
+					if content and content ~= vim.NIL then
+						-- has_tokens = true
+						vim.api.nvim_command('undojoin')
+						write_string_at_cursor(content)
+					end
+				end)
+
 			if return_val ~= 0 then
 				print("Curl command failed with code:", return_val)
 			end
