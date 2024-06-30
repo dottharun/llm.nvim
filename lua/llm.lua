@@ -211,14 +211,12 @@ local function prepare_request(opts)
 		data = {
 			contents = {
 				{
-					parts = {
-						{
-							text = "\n============ sytem prompt ============\n"
-								.. system_prompt
-								.. "\n=========== user's prompt ============\n"
-								.. prompt,
-						},
-					},
+					parts = { { text = system_prompt } },
+					role = "model",
+				},
+				{
+					parts = { { text = prompt } },
+					role = "user",
 				},
 			},
 		}
